@@ -18,9 +18,10 @@
         "removeComments": true,
         "sourceMap": true,
         "strictNullChecks": false,
-        "target": "es5"
+        "target": "es5",
+        "outDir": "./"
     },
-    "include": [
+    "files": [
         "src/typescript-ioc.ts", "src/container-config.ts"
     ]
 }
