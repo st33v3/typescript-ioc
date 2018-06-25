@@ -448,6 +448,25 @@ class IoCContainer {
     }
   }
 
+  static objectHash(o: object): string {
+    if (!o) {
+      return "0";
+    }
+    let h = IoCContainer.functionHashes.get(o);
+    if (h) {
+      return h;
+    }
+    const n = o.toString().split("").reduce(function(a, b) {
+        a = ((a << 5) - a) + b.charCodeAt(0);
+        return a & a;
+      }, 0);
+      h = "00000000" + n.toString(16).substring(-8);
+      IoCContainer.functionHashes.set(o, h);
+      return h;
+  }
+
+  private static functionHashes = new WeakMap<object, string>();
+
   static normalizeQualifier(qualifier: {}): string {
     const acc = [];
     // console.log("Qualifier: " + qualifier);
@@ -457,8 +476,9 @@ class IoCContainer {
         case 'number': acc.push(key + ":" + v); break;
         case 'boolean': acc.push(key + ":" + v); break;
         case 'string': acc.push(key + ":" + v); break;
+        case 'function': acc.push(key + ":" + v.name + IoCContainer.objectHash(v)); break;
         default:
-          throw new TypeError("Qualifier properties can be only primitive types");
+          throw new TypeError("Qualifier properties can be only primitive types or constructor functions");
       }
     }
     return "{" + acc.join(",") + "}";
