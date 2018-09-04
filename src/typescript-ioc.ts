@@ -740,7 +740,7 @@ class InjectorHandler {
         return typeConstructor;
       }
     }
-    throw TypeError("Can not identify the base Type for requested target");
+    throw TypeError("Can not identify the base Type for requested target " + target.toString());
   }
 
   static getQualifierFromType(target: Constructor<any>): {} {
