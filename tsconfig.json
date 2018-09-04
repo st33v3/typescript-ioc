@@ -22,6 +22,6 @@
         "outDir": "./"
     },
     "files": [
-        "src/typescript-ioc.ts", "src/container-config.ts"
+        "src/typescript-ioc.ts", "src/container-config.ts", "src/copying.ts"
     ]
 }
