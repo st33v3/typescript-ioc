@@ -195,7 +195,6 @@ function handleInject(qualifier: {}, args: any[]) {
   if (args.length < 3 || typeof args[2] === "undefined") {
     return InjectPropertyDecorator(args[0], args[1], qualifier);
   } else if (args.length === 3 && typeof args[2] === "number") {
-    console.log("Params of " + args[0] + " at pos " + args[2]);
     return InjectParamDecorator(args[0], qualifier, args[1], args[2]);
   }
 
@@ -205,7 +204,7 @@ function handleInject(qualifier: {}, args: any[]) {
 /**
  * Decorator processor for [[Inject]] decorator on properties
  */
-function InjectPropertyDecorator(target: Function, key: string, qualifier: {}) {
+function InjectPropertyDecorator<T>(target: Constructor<T>, key: string, qualifier: {}) {
   let t = Reflect.getMetadata("design:type", target, key);
   if (!t) {
     // Needed to support react native inheritance
@@ -225,15 +224,12 @@ function InjectParamDecorator<T>(
 ) {
   if (!propertyKey) {
     // only intercept constructor parameters
-    const config = <ConfigImpl<T>>IoCContainer.bind(target, qualifier);
-    config.paramTypes = config.paramTypes || [];
-    config.paramQualifiers = config.paramQualifiers || [];
+    const factory = <Factory<T>>IoCContainer.getFactory(target);
     const paramTypes: Array<any> = Reflect.getMetadata(
       "design:paramtypes",
       target
     );
-    config.paramTypes.unshift(paramTypes[parameterIndex]);
-    config.paramQualifiers.unshift(qualifier);
+    factory.prependParam(paramTypes[parameterIndex], qualifier);
   }
 }
 
@@ -295,7 +291,7 @@ export class Container {
    * @param source The dependency type to resolve
    * @return an object resolved for the given source type;
    */
-  static getAll<T>(source: Constructor<T>): [any, T][] {
+  static getAll<T>(source: Constructor<T>): [{}, T][] {
     return IoCContainer.getAll(source);
   }
 
@@ -342,6 +338,7 @@ export class Container {
  */
 class IoCContainer {
   private static bindings: Map<Constructor<any>, Map<string, ConfigImpl<any>>> = new Map();
+  private static factories: Map<Constructor<any>, Factory<any>> = new Map();
 
   static isBound<T>(source: Constructor<T>, qualifier: {}): boolean {
     checkType(source);
@@ -363,6 +360,17 @@ class IoCContainer {
       IoCContainer.bindings.set(baseSource, map);
     }
     return map;
+  }
+
+  static getFactory<T>(target: Constructor<T>): InstanceFactory<T> {
+    checkType(target);
+    const baseTarget = InjectorHandler.getConstructorFromType(target);
+    let ret = IoCContainer.factories.get(baseTarget);
+    if (!ret) {
+      ret = new Factory(baseTarget);
+      IoCContainer.factories.set(baseTarget, ret);
+    }
+    return <InstanceFactory<T>>ret;
   }
 
   static bind<T>(source: Constructor<T>, qualifier: {}): ConfigImpl<T> {
@@ -476,7 +484,7 @@ class IoCContainer {
         case 'number': acc.push(key + ":" + v); break;
         case 'boolean': acc.push(key + ":" + v); break;
         case 'string': acc.push(key + ":" + v); break;
-        case 'function': acc.push(key + ":" + v.name + IoCContainer.objectHash(v)); break;
+        case 'function': acc.push(key + ":" + v.name + "#" + IoCContainer.objectHash(v)); break;
         default:
           throw new TypeError("Qualifier properties can be only primitive types or constructor functions");
       }
@@ -506,21 +514,62 @@ export interface Config<T> {
    */
   to(target: Constructor<T>): Config<T>;
   /**
+   * Set given instance to be used when a dependency for the source type is requested.
+   * @param instance resulting instance
+   */
+  toInstance(instance: T): Config<T>;
+  /**
    * Inform a provider to be used to create instances when a dependency for the source type is requested.
    * @param provider The provider to create instances
    */
   provider(provider: Provider<T>): Config<T>;
+  /**
+   * Inform a provider to be used to create instances when a dependency for the source type is requested.
+   * @param provider The provider to create instances
+   */
+  providerFun(fun: () => T): Config<T>;
   /**
    * Inform a scope to handle the instances for objects created by the Container for this binding.
    * @param scope Scope to handle instances
    */
   scope(scope: Scope): Config<T>;
 
-  /**
-   * Inform the types to be retrieved from IoC Container and passed to the type constructor.
-   * @param paramTypes A list with parameter types.
-   */
-  withParams(...paramTypes: any[]): Config<T>;
+}
+
+/**
+ * Instance factory is responsible for creating fresh instance of a particular type.
+ */
+export interface InstanceFactory<T> {
+    /**
+     * Creates new instance of T.
+     */
+    getInstance(): T;
+}
+
+class Factory<T> implements InstanceFactory<T> {
+    private paramTypes: Array<any> = [];
+    private paramQualifiers: Array<{}> = [];
+    constructor(private target: Constructor<T>) {
+      /**/
+    }
+    private getParameters(): any[] {
+        const ret = [];
+        for(let i = 0; i < this.paramTypes.length; i++) {
+            ret.push(IoCContainer.get(this.paramTypes[i], this.paramQualifiers[i]));
+        }
+        return ret;
+    }
+
+    getInstance(): T {
+        const constr = <FunctionConstructor>(<any>this.target);
+        const params = this.getParameters();
+        return <T>(<any>(new constr(...params)));
+    }
+
+    prependParam(paramType: Constructor<any>, qualifier: {}) {
+        this.paramTypes.unshift(paramType);
+        this.paramQualifiers.unshift(qualifier);
+    }
 }
 
 class ConfigImpl<T> implements Config<T> {
@@ -528,8 +577,6 @@ class ConfigImpl<T> implements Config<T> {
   targetSource: Function;
   iocprovider: Provider<T>;
   iocscope: Scope;
-  paramTypes: Array<any>;
-  paramQualifiers: Array<{}>;
   qualifier: {};
 
   constructor(source: Constructor<T>, qualifier: {}) {
@@ -542,12 +589,9 @@ class ConfigImpl<T> implements Config<T> {
     const targetSource = InjectorHandler.getConstructorFromType(target);
     this.targetSource = targetSource;
     if (this.source === targetSource) {
+      const factory = IoCContainer.getFactory(target);
       this.iocprovider = {
-        get: () => {
-          const constr = <FunctionConstructor>(<any>target);
-          const params = this.getParameters();
-          return <T>(<any>(params ? new constr(...params) : new constr()));
-        }
+        get: () => factory.getInstance()
       };
     } else {
       this.iocprovider = {
@@ -562,12 +606,20 @@ class ConfigImpl<T> implements Config<T> {
     return this;
   }
 
+  toInstance(instance: T) {
+    return this.provider({ get: () => instance });
+  }
+
   provider(provider: Provider<T>) {
     this.iocprovider = provider;
     if (this.iocscope) {
       this.iocscope.reset(this.source, this.qualifier);
     }
     return this;
+  }
+
+  providerFun(fun: () => T) {
+    return this.provider({ get: fun });
   }
 
   scope(scope: Scope) {
@@ -581,11 +633,6 @@ class ConfigImpl<T> implements Config<T> {
     return this;
   }
 
-  withParams(...paramTypes: any[]) {
-    this.paramTypes = paramTypes;
-    return this;
-  }
-
   getInstance() {
     if (!this.iocscope) {
       this.scope(Scope.Local);
@@ -593,16 +640,6 @@ class ConfigImpl<T> implements Config<T> {
     return this.iocscope.resolve(this.iocprovider, this.source, this.qualifier);
   }
 
-  private getParameters(): any[] {
-    if (this.paramTypes) {
-      const ret = [];
-      for(let i = 0; i < this.paramTypes.length; i++) {
-        ret.push(IoCContainer.get(this.paramTypes[i], this.paramQualifiers[i]));
-      }
-      return ret;
-    }
-    return null;
-  }
 }
 
 /**

@@ -16,8 +16,14 @@ describe("@Inject annotation on a property", () => {
 		dateProperty: Date;
 	}
 
-	@IoC.AutoWired
-	class ConstructorSimppleInject {
+    @IoC.AutoWired
+    class SimppleInjectQualifier {
+        @IoC.Inject({name: "x"})
+        dateProperty: Date;
+    }
+
+    @IoC.AutoWired
+	class ConstructorSimpleInject {
 		@IoC.Inject
 		aDateProperty: Date;
 
@@ -40,13 +46,26 @@ describe("@Inject annotation on a property", () => {
 		}
 	}
 
+    @IoC.AutoWired
+    class ConstructorInjectedQulifier extends AbsClass {
+        constructor(@IoC.Inject({name: "x"}) public anotherDate: Date) {
+            super(anotherDate);
+        }
+    }
+
     it("should inject a new value on the property field", () => {
-        const instance: SimppleInject = new SimppleInject();
+        const instance = new SimppleInject();
         expect(instance.dateProperty).to.exist;
     });
 
+    it("should inject a new value with respect to qualifier on the property field", () => {
+        const instance = new SimppleInjectQualifier();
+        expect(instance.dateProperty).to.exist;
+    });
+
+
     it("should inject a new value on the property field that is accessible inside class constructor", () => {
-        const instance = new ConstructorSimppleInject();
+        const instance = new ConstructorSimpleInject();
         expect(instance.testOK).to.equal(true);
     });	
 
@@ -56,7 +75,18 @@ describe("@Inject annotation on a property", () => {
         expect(instance.anotherDate).to.exist;
         expect(instance.date).to.exist;
         expect(instance.date).to.equal(instance.anotherDate);
-    });	
+        expect(instance.date.getTime()).to.not.equal(0);
+    });
+
+    it("should inject a new value with respect to qualifier on the property field that is injected into constructor", () => {
+        IoC.Container.bind(Date, {name: "x"}).toInstance(new Date(0));
+        expect(IoC.Container.get(Date, {name: "x"})).to.exist;
+        const instance = IoC.Container.get(ConstructorInjectedQulifier);
+        expect(instance.anotherDate).to.exist;
+        expect(instance.date).to.exist;
+        expect(instance.date).to.equal(instance.anotherDate);
+        expect(instance.date.getTime()).to.equal(0);
+    });
 });
 
 describe("@Inject annotation on Constructor parameter", () => {
@@ -79,23 +109,20 @@ describe("@Inject annotation on Constructor parameter", () => {
 		teste1: TesteConstructor;
 	}
 
-    it("should inject a new value as argument on cosntrutor call, when parameter is not provided", () => {
+    it("should inject a new value as argument on constructor call, when parameter is not provided", () => {
         const instance = new TesteConstructor2();
         expect(instance.teste1.injectedDate).to.exist
         expect(constructorsArgs.length).to.equal(1);
     });
 
-    it("should not inject a new value as argument on cosntrutor call, when parameter is provided", () => {
+    it("should not inject a new value as argument on constructor call, when parameter is provided", () => {
         const myDate = new Date(1);
         const instance = new TesteConstructor(myDate);
         expect(instance.injectedDate).to.equals(myDate);
     });
 
-	@IoC.AutoWired
 	class aaaa { }
-	@IoC.AutoWired
 	class bbbb { }
-	@IoC.AutoWired
 	class cccc { }
 
 	@IoC.AutoWired
@@ -112,9 +139,9 @@ describe("@Inject annotation on Constructor parameter", () => {
         expect(constructorsMultipleArgs[0]).to.exist
         expect(constructorsMultipleArgs[1]).to.exist
         expect(constructorsMultipleArgs[2]).to.exist
-        // expect(constructorsMultipleArgs[0].constructor).to.equals(aaaa);
-        // expect(constructorsMultipleArgs[1].constructor).to.equals(bbbb);
-        // expect(constructorsMultipleArgs[2].constructor).to.equals(cccc);
+        expect(constructorsMultipleArgs[0]).to.instanceOf(aaaa);
+        expect(constructorsMultipleArgs[1]).to.instanceOf(bbbb);
+        expect(constructorsMultipleArgs[2]).to.instanceOf(cccc);
 	});	
 });
 
