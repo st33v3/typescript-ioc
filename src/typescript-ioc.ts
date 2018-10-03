@@ -25,6 +25,7 @@ import "reflect-metadata";
  */
 
 export type Constructor<T> = Function & { prototype: T };
+export type Qualifier = {};
 
 export function Singleton<T>(target: Constructor<T>) {
   const qualifier = InjectorHandler.getQualifierFromType(target);
@@ -84,7 +85,7 @@ export function Scoped(scope: Scope) {
  * ```
  * @param provider The provider that will handle instantiations for this class.
  */
-export function Provided<T>(provider: Provider<T>, qualifier?: {}) {
+export function Provided<T>(provider: Provider<T>, qualifier?: Qualifier) {
   qualifier = qualifier || {};
   return function(target: Constructor<T>) {
     IoCContainer.bind(target, qualifier).provider(provider);
@@ -111,7 +112,7 @@ export function Provided<T>(provider: Provider<T>, qualifier?: {}) {
  * ```
  * @param target The base class that will be replaced by this class.
  */
-export function Provides<T>(target: Constructor<T>, qualifier?: {}) {
+export function Provides<T>(target: Constructor<T>, qualifier?: Qualifier) {
   return function(to: Constructor<T>) {
     qualifier = qualifier || {};
     IoCContainer.bind(target, qualifier).to(to);
@@ -191,7 +192,7 @@ export function Inject(...args: any[]): any {
   }
 }
 
-function handleInject(qualifier: {}, args: any[]) {
+function handleInject(qualifier: Qualifier, args: any[]) {
   if (args.length < 3 || typeof args[2] === "undefined") {
     return InjectPropertyDecorator(args[0], args[1], qualifier);
   } else if (args.length === 3 && typeof args[2] === "number") {
@@ -204,7 +205,7 @@ function handleInject(qualifier: {}, args: any[]) {
 /**
  * Decorator processor for [[Inject]] decorator on properties
  */
-function InjectPropertyDecorator<T>(target: Constructor<T>, key: string, qualifier: {}) {
+function InjectPropertyDecorator<T>(target: Constructor<T>, key: string, qualifier: Qualifier) {
   let t = Reflect.getMetadata("design:type", target, key);
   if (!t) {
     // Needed to support react native inheritance
@@ -218,7 +219,7 @@ function InjectPropertyDecorator<T>(target: Constructor<T>, key: string, qualifi
  */
 function InjectParamDecorator<T>(
   target: Constructor<T>,
-  qualifier: {},
+  qualifier: Qualifier,
   propertyKey: string | symbol,
   parameterIndex: number
 ) {
@@ -262,7 +263,7 @@ export class Container {
    * @param source The type that will be bound to the Container
    * @return a container configuration
    */
-  static bind<T>(source: Constructor<T>, qualifier?: {}): Config<T> {
+  static bind<T>(source: Constructor<T>, qualifier?: Qualifier): Config<T> {
     qualifier = qualifier || {};
     if (!IoCContainer.isBound(source, qualifier)) {
       AutoWired(source);
@@ -273,13 +274,25 @@ export class Container {
   }
 
   /**
+   * Determines if given type is bound to the container.
+   * @param source The dependency type to resolve
+   * @param qualifier qualifier of instance to be retrieved from the container
+   * @return true if given type is bound under given qualifier, false otherwise
+   */
+  static isBound<T>(source: Constructor<T>, qualifier?: {}): boolean {
+    return IoCContainer.isBound(source, qualifier);
+  }
+
+  /**
    * Retrieve an object from the container. It will resolve all dependencies and apply any type replacement
    * before return the object.
-   * If there is no declared dependency to the given source type, an implicity bind is performed to this type.
+   * If there is no declared dependency to the given source type, exception is thrown.
    * @param source The dependency type to resolve
+   * @param qualifier qualifier of instance to be retrieved from the container
    * @return an object resolved for the given source type;
+   * @throws Error when given type is not bound the the container
    */
-  static get<T>(source: Constructor<T>, qualifier?: {}): T {
+  static get<T>(source: Constructor<T>, qualifier?: Qualifier): T {
     qualifier = qualifier || {};
     return IoCContainer.get(source, qualifier);
   }
@@ -291,7 +304,7 @@ export class Container {
    * @param source The dependency type to resolve
    * @return an object resolved for the given source type;
    */
-  static getAll<T>(source: Constructor<T>): [{}, T][] {
+  static getAll<T>(source: Constructor<T>): [Qualifier, T][] {
     return IoCContainer.getAll(source);
   }
 
@@ -308,7 +321,7 @@ export class Container {
    * Store the state for a specified binding.  Can then be restored later.   Useful for testing.
    * @param source The dependency type
    */
-  static snapshot<T>(source: Constructor<T>, qualifier: {}): void {
+  static snapshot<T>(source: Constructor<T>, qualifier: Qualifier): void {
     const config = <ConfigImpl<T>>Container.bind(source, qualifier);
     Container.snapshots.providers.set(source, config.iocprovider);
     if (config.iocscope) {
@@ -321,7 +334,7 @@ export class Container {
    * Restores the state for a specified binding that was previously captured by snapshot.
    * @param source The dependency type
    */
-  static restore<T>(source: Constructor<T>, qualifier: {}): void {
+  static restore<T>(source: Constructor<T>, qualifier: Qualifier): void {
     if (!Container.snapshots.providers.has(source)) {
       throw new TypeError("Config for source was never snapshoted.");
     }
@@ -340,20 +353,23 @@ class IoCContainer {
   private static bindings: Map<Constructor<any>, Map<string, ConfigImpl<any>>> = new Map();
   private static factories: Map<Constructor<any>, Factory<any>> = new Map();
 
-  static isBound<T>(source: Constructor<T>, qualifier: {}): boolean {
+  private static getBinding<T>(source: Constructor<T>, qualifier: Qualifier): [Constructor<T>, string, ConfigImpl<T> | undefined] {
     checkType(source);
     const baseSource = InjectorHandler.getConstructorFromType(source);
+    const nq = IoCContainer.normalizeQualifier(qualifier);
     const map = IoCContainer.bindings.get(baseSource);
     if (!map) {
-      return false;
+      return [baseSource, nq, undefined];
     }
-    const config = map.get(IoCContainer.normalizeQualifier(qualifier));
-    return !!config;
+    const config = map.get(nq);
+    return [baseSource, nq, config];
   }
 
-  private static getMap<T>(source: Constructor<T>, create: boolean): Map<string, ConfigImpl<T>> {
-    checkType(source);
-    const baseSource = InjectorHandler.getConstructorFromType(source);
+  static isBound<T>(source: Constructor<T>, qualifier: Qualifier): boolean {
+    return !!IoCContainer.getBinding(source, qualifier)[2];
+  }
+
+  private static getMap<T>(baseSource: Constructor<T>, create: boolean): Map<string, ConfigImpl<T>> {
     let map = IoCContainer.bindings.get(baseSource);
     if (!map && create) {
       map = new Map();
@@ -373,20 +389,21 @@ class IoCContainer {
     return <InstanceFactory<T>>ret;
   }
 
-  static bind<T>(source: Constructor<T>, qualifier: {}): ConfigImpl<T> {
-    const baseSource = InjectorHandler.getConstructorFromType(source);
-    const map = IoCContainer.getMap(source, true);
-    const nq = IoCContainer.normalizeQualifier(qualifier);
-    let config = map.get(nq);
+  static bind<T>(source: Constructor<T>, qualifier: Qualifier): ConfigImpl<T> {
+    const binding = IoCContainer.getBinding(source, qualifier);
+    const map = IoCContainer.getMap(binding[0], true);
+    let config = map.get(binding[1]);
     if (!config) {
-      config = new ConfigImpl(baseSource, qualifier);
-      map.set(nq, config);
+      config = new ConfigImpl(binding[0], qualifier);
+      map.set(binding[1], config);
     }
     return config;
   }
 
-  static getAll<T>(source: Constructor<T>): [{}, T][] {
-    const map = IoCContainer.getMap(source, false);
+  static getAll<T>(source: Constructor<T>): [Qualifier, T][] {
+    checkType(source);
+    const baseSource = InjectorHandler.getConstructorFromType(source);
+    const map = IoCContainer.getMap(baseSource, false);
     if (!map) {
       return [];
     }
@@ -400,38 +417,27 @@ class IoCContainer {
     return ret;
   }
 
-  static get<T>(source: Constructor<T>, qualifier: {}): T {
-    // const map = IoCContainer.getMap(source, false);
-    // if (!map) {
-    //   return null;
-    // }
-    // const nq = IoCContainer.normalizeQualifier(qualifier);
-    // const config = map.get(nq);
-    // if (!config) {
-    //   return null;
-    // }
-    const config = IoCContainer.bind(source, qualifier);
-    if (!config.iocprovider) {
-      config.to(config.source);
+  static get<T>(source: Constructor<T>, qualifier: Qualifier): T {
+    const binding = IoCContainer.getBinding(source, qualifier);
+    if (!binding[2] || !binding[2].iocprovider) {
+      throw new TypeError(`The type ${source.name} hasn't been registered with the IOC Container`);
     }
-    return config.getInstance();
+    return binding[2].getInstance();
   }
 
-  // static getType(source: Function): Function {
-  //     checkType(source);
-  //     const baseSource = InjectorHandler.getConstructorFromType(source);
-  //     const map = IoCContainer.bindings.get(baseSource);
-  //     if (!map) {
-  //         throw new TypeError(`The type ${source.name} hasn't been registered with the IOC Container`);
-  //     }
-  //     return config.targetSource || config.source;
-  // }
+  static getType<T>(source: Constructor<T>, qualifier: Qualifier): Function {
+    const binding = IoCContainer.getBinding(source, qualifier);
+    if (!binding[2] || !binding[2].iocprovider) {
+      throw new TypeError(`The type ${source.name} hasn't been registered with the IOC Container`);
+    }
+    return binding[2].targetSource || binding[2].source;
+  }
 
   static injectProperty(
     target: Function,
     key: string,
     propertyType: Constructor<any>,
-    propertyQualifier: {}
+    propertyQualifier: Qualifier
   ) {
     const propKey = `__${key}`;
     Object.defineProperty(target.prototype, key, {
@@ -475,7 +481,7 @@ class IoCContainer {
 
   private static functionHashes = new WeakMap<object, string>();
 
-  static normalizeQualifier(qualifier: {}): string {
+  static normalizeQualifier(qualifier: Qualifier): string {
     const acc = [];
     // console.log("Qualifier: " + qualifier);
     for (const key of Object.keys(qualifier).sort()) {
@@ -577,9 +583,9 @@ class ConfigImpl<T> implements Config<T> {
   targetSource: Function;
   iocprovider: Provider<T>;
   iocscope: Scope;
-  qualifier: {};
+  qualifier: Qualifier;
 
-  constructor(source: Constructor<T>, qualifier: {}) {
+  constructor(source: Constructor<T>, qualifier: Qualifier) {
     this.source = source;
     this.qualifier = qualifier;
   }
@@ -680,14 +686,14 @@ export abstract class Scope {
   abstract resolve<T>(
     provider: Provider<T>,
     source: Constructor<T>,
-    qualifier: {}
+    qualifier: Qualifier
   ): T;
 
   /**
    * Called by the IoC Container when some configuration is changed on the Container binding.
    * @param source The source type that has its configuration changed.
    */
-  reset(source: Constructor<any>, qualifier: {}) {
+  reset(source: Constructor<any>, qualifier: Qualifier) {
     // Do nothing
   }
 }
@@ -696,7 +702,7 @@ export abstract class Scope {
  * Default [[Scope]] that always create a new instace for any dependency resolution request
  */
 class LocalScope extends Scope {
-  resolve<T>(provider: Provider<T>, source: Constructor<T>, qualifier: {}): T {
+  resolve<T>(provider: Provider<T>, source: Constructor<T>, qualifier: Qualifier): T {
     return provider.get();
   }
 }
@@ -707,7 +713,7 @@ Scope.Local = new LocalScope();
  * Scope that create only a single instace to handle all dependency resolution requests.
  */
 class SingletonScope extends Scope {
-  private static instances: Map<[Constructor<any>, {}], any> = new Map();
+  private static instances: Map<[Constructor<any>, Qualifier], any> = new Map();
 
   resolve<T>(provider: Provider<T>, source: Constructor<T>, qualifier: {}): T {
     let instance = SingletonScope.instances.get([source, qualifier]);
@@ -720,7 +726,7 @@ class SingletonScope extends Scope {
     return instance;
   }
 
-  reset(source: Constructor<any>, qualifier: {}) {
+  reset(source: Constructor<any>, qualifier: Qualifier) {
     SingletonScope.instances.delete([
       InjectorHandler.getConstructorFromType(source),
       qualifier
@@ -736,7 +742,7 @@ Scope.Singleton = new SingletonScope();
 class InjectorHandler {
   static constructorNameRegEx = /function (\w*)/;
 
-  static decorateConstructor(target: Constructor<any>, qualifier: {}) {
+  static decorateConstructor(target: Constructor<any>, qualifier: Qualifier) {
     let newConstructor: any;
     // tslint:disable-next-line:class-name
     newConstructor = class ioc_wrapper extends (<FunctionConstructor>target) {
@@ -780,7 +786,7 @@ class InjectorHandler {
     throw TypeError("Can not identify the base Type for requested target " + target.toString());
   }
 
-  static getQualifierFromType(target: Constructor<any>): {} {
+  static getQualifierFromType(target: Constructor<any>): Qualifier {
     let typeConstructor: any = target;
     do {
       if (typeConstructor["__qualifier"]) {
