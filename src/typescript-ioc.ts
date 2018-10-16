@@ -25,7 +25,9 @@ import "reflect-metadata";
  */
 
 export type Constructor<T> = Function & { prototype: T };
-export type Qualifier = {};
+export interface Qualifier {
+  /**/
+}
 
 export function Singleton<T>(target: Constructor<T>) {
   const qualifier = InjectorHandler.getQualifierFromType(target);
@@ -308,6 +310,17 @@ export class Container {
     return IoCContainer.getAll(source);
   }
 
+    /**
+   * Retrieve an object from the container. It will resolve all dependencies and apply any type replacement
+   * before return the object.
+   * If there is no declared dependency to the given source type, an implicity bind is performed to this type.
+   * @param source The dependency type to resolve
+   * @return an object resolved for the given source type;
+   */
+  static getAllFactories<T>(source: Constructor<T>): Array<QualifiedInstanceFactory<T>> {
+    return IoCContainer.getAllConfigs(source);
+  }
+
   // /**
   //  * Retrieve a type associated with the type provided from the container
   //  * @param source The dependency type to resolve
@@ -400,19 +413,20 @@ class IoCContainer {
     return config;
   }
 
-  static getAll<T>(source: Constructor<T>): [Qualifier, T][] {
+  static getAllConfigs<T>(source: Constructor<T>): Array<ConfigImpl<T>> {
     checkType(source);
     const baseSource = InjectorHandler.getConstructorFromType(source);
     const map = IoCContainer.getMap(baseSource, false);
     if (!map) {
       return [];
     }
+    return Array.from(map.values());
+  }
+
+  static getAll<T>(source: Constructor<T>): [Qualifier, T][] {
     const ret = Array.of<[{}, T]>();
-    const it = map.values();
-    let x = it.next();
-    while (!x.done) {
-      ret.push([x.value.qualifier, x.value.getInstance()]);
-      x = it.next();
+    for (const x of IoCContainer.getAllConfigs(source)) {
+      ret.push([x.qualifier, x.getInstance()]);
     }
     return ret;
   }
@@ -551,6 +565,12 @@ export interface InstanceFactory<T> {
      */
     getInstance(): T;
 }
+export interface QualifiedInstanceFactory<T> extends InstanceFactory<T> {
+  /**
+   * the qualifier
+   */
+  qualifier: Qualifier;
+}
 
 class Factory<T> implements InstanceFactory<T> {
     private paramTypes: Array<any> = [];
@@ -578,7 +598,7 @@ class Factory<T> implements InstanceFactory<T> {
     }
 }
 
-class ConfigImpl<T> implements Config<T> {
+class ConfigImpl<T> implements Config<T>, QualifiedInstanceFactory<T> {
   source: Constructor<T>;
   targetSource: Function;
   iocprovider: Provider<T>;
