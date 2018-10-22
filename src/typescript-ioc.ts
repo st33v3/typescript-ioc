@@ -150,7 +150,8 @@ export function Provides<T>(target: Constructor<T>, qualifier?: Qualifier) {
  */
 export function AutoWired<T>(target: Constructor<T>) {
   // <T extends {new(...args:any[]):{}}>(target:T) {
-  IoCContainer.bind(target, {}); // TODO backward compatibility
+  // TODO autowired classes should only modify constructor (and instantiate proper Factory), they should not bind themselves at all.
+  IoCContainer.bind(target, {}).to(target); // TODO backward compatibility
   const newConstructor = InjectorHandler.decorateConstructor(target, {});
   return newConstructor;
 }
@@ -622,7 +623,8 @@ class ConfigImpl<T> implements Config<T>, QualifiedInstanceFactory<T> {
     } else {
       this.iocprovider = {
         get: () => {
-          return IoCContainer.get(target, this.qualifier);
+          const factory = IoCContainer.getFactory(target);
+          return factory.getInstance();
         }
       };
     }

@@ -1,5 +1,5 @@
-'use strict';
 /* tslint:disable */
+'use strict';
 import 'mocha';
 import * as chai from 'chai';
 import "reflect-metadata";
@@ -7,6 +7,9 @@ import * as IoC from "../../src/typescript-ioc";
 import { ContainerConfig } from "../../src/container-config";
 
 const expect = chai.expect;
+
+IoC.Container.bind(Date).providerFun(() => new Date());
+IoC.Container.bind(Date, {name: "x"}).providerFun(() => new Date(0));
 
 describe("@Inject annotation on a property", () => {
 
@@ -125,6 +128,9 @@ describe("@Inject annotation on Constructor parameter", () => {
 	class bbbb { }
 	class cccc { }
 
+	IoC.Container.bind(aaaa).to(aaaa);
+	IoC.Container.bind(bbbb).to(bbbb);
+	IoC.Container.bind(cccc).to(cccc);
 	@IoC.AutoWired
 	class dddd {
 		constructor( @IoC.Inject a: aaaa, @IoC.Inject b: bbbb, @IoC.Inject c: cccc) {
@@ -133,6 +139,7 @@ describe("@Inject annotation on Constructor parameter", () => {
 			constructorsMultipleArgs.push(c);
 		}
 	}
+	
     it("should inject multiple arguments on construtor call in correct order", () => {
         const instance: dddd = IoC.Container.get(dddd);
         expect(instance).to.exist
