@@ -735,24 +735,37 @@ Scope.Local = new LocalScope();
  * Scope that create only a single instace to handle all dependency resolution requests.
  */
 class SingletonScope extends Scope {
-  private static instances: Map<[Constructor<any>, Qualifier], any> = new Map();
+  private static instances: Map<Constructor<any>, Map<string, any>> = new Map();
 
   resolve<T>(provider: Provider<T>, source: Constructor<T>, qualifier: {}): T {
-    let instance = SingletonScope.instances.get([source, qualifier]);
+    source = InjectorHandler.getConstructorFromType(source);
+    const nc = IoCContainer.normalizeQualifier(qualifier);
+    let map = SingletonScope.instances.get(source);
+    let instance = map ? map.get(nc) : undefined;
     if (!instance) {
       (<any>source)["__block_Instantiation"] = false;
       instance = provider.get();
       (<any>source)["__block_Instantiation"] = true;
-      SingletonScope.instances.set([source, qualifier], instance);
+      if (!map) {
+        map = new Map();
+        SingletonScope.instances.set(source, map);
+      }
+      map.set(nc, instance);
     }
     return instance;
   }
 
   reset(source: Constructor<any>, qualifier: Qualifier) {
-    SingletonScope.instances.delete([
-      InjectorHandler.getConstructorFromType(source),
-      qualifier
-    ]);
+    source = InjectorHandler.getConstructorFromType(source);
+    const map = SingletonScope.instances.get(source);
+    if (!map) {
+      return;
+    }
+    const nc = IoCContainer.normalizeQualifier(qualifier);
+    map.delete(nc);
+    if (map.size === 0) {
+      SingletonScope.instances.delete(source);
+    }
   }
 }
 
