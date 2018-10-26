@@ -7,34 +7,9 @@
 
 import "reflect-metadata";
 
-/**
- * A decorator to tell the container that this class should be handled by the Singleton [[Scope]].
- *
- * ```
- * @ Singleton
- * class PersonDAO {
- *
- * }
- * ```
- *
- * Is the same that use:
- *
- * ```
- * Container.bind(PersonDAO).scope(Scope.Singleton)
- * ```
- */
-
 export type Constructor<T> = Function & { prototype: T };
 export interface Qualifier {
   /**/
-}
-
-export function Singleton<T>(target: Constructor<T>) {
-  const qualifier = InjectorHandler.getQualifierFromType(target);
-  if (qualifier === null) {
-    throw new Error("Missing qualifier.");
-  }
-  IoCContainer.bind(target, qualifier).scope(Scope.Singleton);
 }
 
 /**
@@ -60,13 +35,11 @@ export function Singleton<T>(target: Constructor<T>) {
  * ```
  * @param scope The scope that will handle instantiations for this class.
  */
-export function Scoped(scope: Scope) {
+export function Service(qualifier?: Qualifier, scope?: Scope) {
   return function<T>(target: Constructor<T>) {
-    const qualifier = InjectorHandler.getQualifierFromType(target);
-    if (qualifier === null) {
-      throw new Error("Missing qualifier.");
-    }
-    IoCContainer.bind(target, qualifier).scope(scope);
+    qualifier = qualifier || {};
+    scope = scope || Scope.Local;
+    IoCContainer.bind(target, qualifier).to(target).scope(scope);
   };
 }
 
@@ -87,10 +60,13 @@ export function Scoped(scope: Scope) {
  * ```
  * @param provider The provider that will handle instantiations for this class.
  */
-export function Provided<T>(provider: Provider<T>, qualifier?: Qualifier) {
+export function Provided<T>(provider: Provider<T>, qualifier?: Qualifier, scope?: Scope) {
   qualifier = qualifier || {};
   return function(target: Constructor<T>) {
-    IoCContainer.bind(target, qualifier).provider(provider);
+    const cfg = IoCContainer.bind(target, qualifier).provider(provider);
+    if (scope) {
+      cfg.scope(scope);
+    }
   };
 }
 
@@ -122,7 +98,8 @@ export function Provides<T>(target: Constructor<T>, qualifier?: Qualifier) {
 }
 
 /**
- * A decorator to tell the container that this class should its instantiation always handled by the Container.
+ * A decorator to tell that this class should have its instantiation always handled by the Container. Note that
+ * this decorator itself does not bind the class to the container.
  *
  * An AutoWired class will have its constructor overriden to always delegate its instantiation to the IoC Container.
  * So, if you write:
@@ -140,19 +117,9 @@ export function Provides<T>(target: Constructor<T>, qualifier?: Qualifier) {
  * ```
  * let PersonService = new PersonService(); // will be returned by Container, and all internal dependencies resolved.
  * ```
- *
- * It is the same that use:
- *
- * ```
- * Container.bind(PersonService);
- * let personService: PersonService = Container.get(PersonService);
- * ```
  */
 export function AutoWired<T>(target: Constructor<T>) {
-  // <T extends {new(...args:any[]):{}}>(target:T) {
-  // TODO autowired classes should only modify constructor (and instantiate proper Factory), they should not bind themselves at all.
-  IoCContainer.bind(target, {}).to(target); // TODO backward compatibility
-  const newConstructor = InjectorHandler.decorateConstructor(target, {});
+  const newConstructor = InjectorHandler.decorateConstructor(target);
   return newConstructor;
 }
 
@@ -268,11 +235,6 @@ export class Container {
    */
   static bind<T>(source: Constructor<T>, qualifier?: Qualifier): Config<T> {
     qualifier = qualifier || {};
-    if (!IoCContainer.isBound(source, qualifier)) {
-      AutoWired(source);
-      return IoCContainer.bind(source, qualifier).to(source);
-    }
-
     return IoCContainer.bind(source, qualifier);
   }
 
@@ -777,7 +739,7 @@ Scope.Singleton = new SingletonScope();
 class InjectorHandler {
   static constructorNameRegEx = /function (\w*)/;
 
-  static decorateConstructor(target: Constructor<any>, qualifier: Qualifier) {
+  static decorateConstructor(target: Constructor<any>) {
     let newConstructor: any;
     // tslint:disable-next-line:class-name
     newConstructor = class ioc_wrapper extends (<FunctionConstructor>target) {
@@ -787,7 +749,6 @@ class InjectorHandler {
       }
     };
     newConstructor["__parent"] = target;
-    newConstructor["__qualifier"] = qualifier;
     return newConstructor;
   }
 
@@ -819,16 +780,5 @@ class InjectorHandler {
       }
     }
     throw TypeError("Can not identify the base Type for requested target " + target.toString());
-  }
-
-  static getQualifierFromType(target: Constructor<any>): Qualifier {
-    let typeConstructor: any = target;
-    do {
-      if (typeConstructor["__qualifier"]) {
-        return typeConstructor["__qualifier"];
-      }
-      typeConstructor = typeConstructor["__parent"];
-    } while (typeConstructor);
-    return null;
   }
 }
