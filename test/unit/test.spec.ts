@@ -511,3 +511,19 @@ describe("The IoC Container", () => {
     });
 
 });
+
+describe("The IoC Container.getAllIncludingInheritors(source)", () => {
+
+	abstract class Parent {}
+	abstract class FirstInheritor1 extends Parent {}
+	class FirstInheritor2 extends Parent {}
+	class SecondInheritor1 extends FirstInheritor1 {}
+
+	IoC.Container.bind(SecondInheritor1).to(SecondInheritor1);
+	IoC.Container.bind(FirstInheritor2).to(FirstInheritor2);
+
+	it("should inject internal fields of non AutoWired classes, if it is requested to the Container", () => {
+		const parents = IoC.Container.getAllIncludingInheritors(Parent);
+		expect(parents.length).to.equals(2);
+	});
+});

@@ -273,6 +273,14 @@ export class Container {
     return IoCContainer.getAll(source);
   }
 
+  /**
+   * Returns all objects bound to the given type or to any of it's inheritors.
+   * The behaviour of this function is similar to {@link getAll}, but it also considers the inheritance.
+   */
+  static getAllIncludingInheritors<T>(source: Constructor<T>): [Qualifier, T][] {
+    return IoCContainer.getAllIncludingInheritors(source);
+  }
+
     /**
    * Retrieve an object from the container. It will resolve all dependencies and apply any type replacement
    * before return the object.
@@ -328,6 +336,7 @@ export class Container {
 class IoCContainer {
   private static bindings: Map<Constructor<any>, Map<string, ConfigImpl<any>>> = new Map();
   private static factories: Map<Constructor<any>, Factory<any>> = new Map();
+  private static inheritors: Map<Constructor<any>, Set<Constructor<any>>> = new Map();
 
   private static getBinding<T>(source: Constructor<T>, qualifier: Qualifier): [Constructor<T>, string, ConfigImpl<T> | undefined] {
     checkType(source);
@@ -367,6 +376,9 @@ class IoCContainer {
 
   static bind<T>(source: Constructor<T>, qualifier: Qualifier): ConfigImpl<T> {
     const binding = IoCContainer.getBinding(source, qualifier);
+    if (!binding[2]) {
+      IoCContainer.updateInheritors(source);
+    }
     const map = IoCContainer.getMap(binding[0], true);
     let config = map.get(binding[1]);
     if (!config) {
@@ -374,6 +386,31 @@ class IoCContainer {
       map.set(binding[1], config);
     }
     return config;
+  }
+
+  private static updateInheritors<T>(source: Constructor<T>): void {
+    const constructor = InjectorHandler.getConstructorFromType(source);
+    const ancestors = IoCContainer.getAllAncestorConstructors(constructor);
+    ancestors.forEach(a => {
+      let inheritors = IoCContainer.inheritors.get(a);
+      if (!inheritors) {
+        inheritors = new Set();
+        IoCContainer.inheritors.set(a, inheritors);
+      }
+      inheritors.add(source);
+    });
+  }
+
+  private static getAllAncestorConstructors<T>(target: Constructor<T>): Array<Constructor<T>> {
+    const result: Array<Constructor<T>> = [];
+    let ancestor: any = Object.getPrototypeOf(target);
+    while (ancestor.name !== '') {
+      if (InjectorHandler.hasNamedConstructor(ancestor)) {
+        result.push(ancestor);
+      }
+      ancestor = Object.getPrototypeOf(ancestor);
+    }
+    return result;
   }
 
   static getAllConfigs<T>(source: Constructor<T>): Array<ConfigImpl<T>> {
@@ -391,6 +428,20 @@ class IoCContainer {
     for (const x of IoCContainer.getAllConfigs(source)) {
       ret.push([x.qualifier, x.getInstance()]);
     }
+    return ret;
+  }
+
+  static getAllIncludingInheritors<T>(source: Constructor<T>): [Qualifier, T][] {
+    const ret = IoCContainer.getAll(source);
+    const constructor = InjectorHandler.getConstructorFromType(source);
+    const inheritors = IoCContainer.inheritors.get(constructor);
+    if (!inheritors) {
+      return ret;
+    }
+    inheritors.forEach(inh => {
+      const inhRet = IoCContainer.getAll(inh);
+      ret.push(...inhRet);
+    });
     return ret;
   }
 
